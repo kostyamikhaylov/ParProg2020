@@ -5,7 +5,22 @@
 
 double calc(uint32_t x_last, uint32_t num_threads)
 {
-  return 0;
+	double result = 0.0;
+	double *thr_res = NULL;
+	thr_res = (double *) calloc (x_last, sizeof (double));
+	if (!thr_res)
+		exit (-1);
+
+	#pragma omp parallel for num_threads (num_threads)
+		for (int i = x_last; i >= 1; i--)
+		{
+			thr_res[i - 1] += 1.0 / i;
+		}
+
+	for (int i = x_last; i > 0; i--)
+		result += thr_res[i - 1];
+
+	return result;
 }
 
 int main(int argc, char** argv)
