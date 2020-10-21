@@ -3,9 +3,98 @@
 #include <fstream>
 #include <omp.h>
 
-void calc(uint32_t xSize, uint32_t ySize, uint32_t iterations, uint32_t num_threads, uint8_t* inputFrame, uint8_t* outputFrame)
-{
+unsigned int CountNeighbours (uint32_t xSize, uint32_t ySize, uint8_t *inputFrame, uint32_t x, uint32_t y);
 
+void calc (uint32_t xSize, uint32_t ySize, uint32_t iterations, uint32_t num_threads, uint8_t* inputFrame, uint8_t* outputFrame)
+{
+	unsigned int len = xSize * ySize;
+	uint32_t num = 0, x = 0, y = 0;
+	uint8_t tmp[len];
+	
+	#pragma omp parallel num_threads (num_threads) private (x, y, num)
+	{
+		for (uint32_t t = 0; t < iterations; t++)
+		{
+			#pragma omp for
+			for (x = 0; x < xSize; x++)
+				for (y = 0; y < xSize; y++)
+				{
+					num = CountNeighbours (xSize, ySize, inputFrame, x, y);
+					if (num == 3)
+						tmp[x * xSize + y] = 1;
+					else if (num == 2 && inputFrame[x * xSize + y] == 1)
+						tmp[x * xSize + y] = 1;
+					else
+						tmp[x * xSize + y] = 0;
+				}
+
+			#pragma omp for
+			for (x = 0; x < xSize; x++)
+				for (y = 0; y < xSize; y++)
+					inputFrame[x * xSize + y] = tmp[x * xSize + y];
+		}
+
+		#pragma omp barrier
+		
+		#pragma omp for
+		for (x = 0; x < xSize; x++)
+			for (y = 0; y < xSize; y++)
+			{
+				if (iterations)
+					outputFrame[x * xSize + y] = tmp[x * xSize + y];
+				else
+					outputFrame[x * xSize + y] = inputFrame[x * xSize + y];
+			}
+		#pragma omp barrier
+	}
+
+	return ;	
+}
+
+unsigned int CountNeighbours (uint32_t xSize, uint32_t ySize, uint8_t *inputFrame, uint32_t x, uint32_t y)
+{
+	uint32_t xm = 0, xp = 0, ym = 0, yp = 0;
+	
+	if (x == 0)
+	{
+		xm = xSize - 1;
+		xp = x + 1;
+	}
+	else if (x == xSize - 1)
+	{
+		xm = xSize - 2;
+		xp = 0;
+	}
+	else
+	{
+		xm = x - 1;
+		xp = x + 1;
+	}
+	
+	if (y == 0)
+	{
+		ym = ySize - 1;
+		yp = y + 1;
+	}
+	else if (y == ySize - 1)
+	{
+		ym = ySize - 2;
+		yp = 0;
+	}
+	else
+	{
+		ym = y - 1;
+		yp = y + 1;
+	}
+	
+	return	(inputFrame[xm * xSize + ym] == 1)
+		+ 	(inputFrame[xm * xSize + y] == 1)
+		+ 	(inputFrame[xm * xSize + yp] == 1)
+		+ 	(inputFrame[x * xSize + ym] == 1)
+		+ 	(inputFrame[x * xSize + yp] == 1)
+		+ 	(inputFrame[xp * xSize + ym] == 1)
+		+ 	(inputFrame[xp * xSize + y] == 1)
+		+ 	(inputFrame[xp * xSize + yp] == 1);
 }
 
 int main(int argc, char** argv)

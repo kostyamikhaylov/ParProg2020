@@ -20,26 +20,56 @@ double KahanSumReversed (double *arr, int len)
 double calc (uint32_t x_last, uint32_t num_threads)
 {
 	double result = 0.0;
-	double *res_arr = NULL, *fact_arr = 0;
+	double *res_arr = NULL, *exchange = NULL;
 	res_arr = (double *) calloc (x_last, sizeof (*res_arr));
-	fact_arr = (double *) calloc (x_last, sizeof (*res_arr));
-	if (!res_arr || !fact_arr)
+	exchange = (double *) calloc (num_threads, sizeof (*exchange));
+	if (!res_arr || !exchange)
 	{
 		fprintf (stderr, "Calloc error\n");
 		exit (-1);
 	}
 
-    fact_arr[0] = 1;
-    for (unsigned int i = 1; i < x_last; i++)
-        fact_arr[i] = fact_arr[i - 1] * i;
+	#pragma omp parallel num_threads (num_threads)
+	{
+		double fact = 1.0;
+		int num = omp_get_thread_num ();
+		unsigned int i = 0;
+		#pragma omp for
+		for (i = 1; i < x_last; i++)
+		{
+			fact *= i;
+			res_arr[i - 1] = fact;
+		}
 
-	#pragma omp parallel for num_threads(num_threads)
-		for (unsigned int i = 0; i < x_last; i++)
-			res_arr[i] = 1.0 / fact_arr[i];
+		exchange[num] = fact;
+		printf ("[%d] send fact = %lg\n", num, fact);
 
-	result = KahanSumReversed (res_arr, x_last);
+		#pragma omp barrier
+
+		fact = 1.0;
+		for (; num > 0; num--)
+			fact *= exchange[num - 1];
+		printf ("[%d] got fact = %lg\n", num, fact);
+
+		#pragma omp for
+		for (i = 0; i < x_last - 1; i++)
+		{
+			res_arr[i] *= fact;
+		}
+		
+		#pragma omp barrier
+
+		#pragma omp for
+		for (i = 0; i < x_last - 1; i++)
+			res_arr[i] = 1.0 / res_arr[i];
+	}
+
+	for (int i = x_last - 2; i >= 0; i--)
+		result += res_arr[i];
+	result += 1.0;
+
 	free (res_arr);
-	free (fact_arr);
+	free (exchange);
 	return result;
 }
 
