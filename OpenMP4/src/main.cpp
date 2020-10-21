@@ -3,20 +3,6 @@
 #include <fstream>
 #include <omp.h>
 
-
-double KahanSumReversed (double *arr, int len)
-{
-	double sum = 0.0, error = 0.0, y = 0.0, t = 0.0;
-	for (int i = len - 1; i >= 0; i--)
-	{
-		y = arr[i] - error;
-		t = sum + y;
-		error = (t - sum) - y;
-		sum = t;
-	}
-	return sum;
-}
-
 double calc (uint32_t x_last, uint32_t num_threads)
 {
 	double result = 0.0;
@@ -42,14 +28,12 @@ double calc (uint32_t x_last, uint32_t num_threads)
 		}
 
 		exchange[num] = fact;
-		printf ("[%d] send fact = %lg\n", num, fact);
 
 		#pragma omp barrier
 
 		fact = 1.0;
 		for (; num > 0; num--)
 			fact *= exchange[num - 1];
-		printf ("[%d] got fact = %lg\n", num, fact);
 
 		#pragma omp for
 		for (i = 0; i < x_last - 1; i++)
