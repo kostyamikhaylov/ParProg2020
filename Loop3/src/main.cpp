@@ -4,19 +4,58 @@
 #include <mpi.h>
 #include <unistd.h>
 #include <cmath>
+#include <string.h>
 
 void calc(double* arr, uint32_t ySize, uint32_t xSize, int rank, int size)
 {
-  if (rank == 0 && size > 0)
-  {
-    for (uint32_t y = 4; y < ySize; y++)
-    {
-      for (uint32_t x = 0; x < xSize; x++)
-      {
-        arr[y*xSize + x] = sin(arr[(y - 4)*xSize + x]);
-      }
-    }
-  }
+	double* reduce = NULL, *backup_arr = NULL;
+	MPI_Bcast (&xSize, 1, MPI_INT, 0, MPI_COMM_WORLD);
+	MPI_Bcast (&ySize, 1, MPI_INT, 0, MPI_COMM_WORLD);
+	if (rank)
+		arr = (double *) calloc (xSize * ySize, sizeof (*arr));
+	if (rank == 0)
+	{
+		backup_arr = (double *) calloc (xSize * ySize, sizeof (*backup_arr));
+		reduce = (double *) calloc (xSize * ySize, sizeof (*reduce));
+	}
+	if (!arr || (!rank && !backup_arr) || (!rank && !reduce))
+	{
+		fprintf (stderr, "Calloc error\n");
+		exit (-1);
+	}
+	MPI_Bcast (arr, xSize * 4, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	uint32_t xFirst = xSize * rank / size;
+	uint32_t xLast = xSize * (rank + 1) / size;
+
+	if (!rank)
+	{
+		memcpy (backup_arr, arr, xSize * ySize * sizeof (double));
+		memset (arr + xSize * 4, '0', xSize * (ySize - 4) * sizeof (double));
+	}
+
+	for (uint32_t y = 4; y < ySize; y++)
+	{
+		for (uint32_t x = xFirst; x < xLast; x++)
+		{
+			arr[y * xSize + x] = sin (arr[(y - 4) * xSize + x]);
+		}
+	}
+	
+	MPI_Reduce (arr, reduce, xSize * ySize, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+	if (rank == 0)
+	{
+		for (uint32_t y = 0; y < 4; y++)
+		{
+			memcpy (reduce + y * xSize, backup_arr + y * xSize, xSize * sizeof (double));
+		}
+		free (backup_arr);
+		memcpy (arr, reduce, xSize * ySize * sizeof (double));
+		free (reduce);
+	}
+	
+	if (rank)
+		free (arr);
 }
 
 int main(int argc, char** argv)
