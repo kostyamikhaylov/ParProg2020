@@ -101,8 +101,7 @@ void calc(double* arr, uint32_t zSize, uint32_t ySize, uint32_t xSize, int rank,
 
 		while (1)
 		{
-			arr[z * ySize * xSize + y * xSize + x] =
-	sin(arr[(z - 1)* ySize * xSize + (y + 1) * xSize + x + 1]);
+			arr[OFFSET(x, y, z)] = sin(arr[OFFSET(x + 1, y + 1, z - 1)]);
 			if (x == 0 || y == 0 || z == zSize - 1)
 				break;
 			x--; y--; z++;
