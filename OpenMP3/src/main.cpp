@@ -9,9 +9,23 @@ double func(double x)
   return sin(x);
 }
 
-double calc(double x0, double x1, double dx, uint32_t num_threads)
+double calc (double x0, double x1, double dx, uint32_t num_threads)
 {
-  return 0;
+	double result = 0.0;
+	int steps_num = int ((x1 - x0) / dx);
+
+	#pragma omp parallel num_threads (num_threads) reduction (+:result)
+	{
+		#pragma omp for
+			for (int i = 1; i <= steps_num; i++)
+			{
+				double x = x0 + i * dx;
+				result += func (x) * dx;
+			}
+	}
+	result += (func (x0) + func (x1)) * dx;
+
+	return result;
 }
 
 int main(int argc, char** argv)
