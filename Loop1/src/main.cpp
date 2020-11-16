@@ -7,16 +7,40 @@
 
 void calc(double* arr, uint32_t ySize, uint32_t xSize, int rank, int size)
 {
-  if (rank == 0 && size > 0)
-  {
-    for (uint32_t y = 0; y < ySize; y++)
-    {
-      for (uint32_t x = 0; x < xSize; x++)
-      {
-        arr[y*xSize + x] = sin(0.00001*arr[y*xSize + x]);
-      }
-    }
-  }
+	MPI_Status status;
+	MPI_Bcast (&xSize, 1, MPI_INT, 0, MPI_COMM_WORLD);
+	MPI_Bcast (&ySize, 1, MPI_INT, 0, MPI_COMM_WORLD);
+	if (rank)
+		arr = (double *) calloc (xSize * ySize, sizeof (*arr));
+	if (!arr)
+	{
+		fprintf (stderr, "Calloc error\n");
+		exit (-1);
+	}
+	MPI_Bcast (arr, xSize * ySize, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	uint32_t first = xSize * ySize * rank / size;
+	uint32_t last = xSize * ySize * (rank + 1) / size;
+	uint32_t len = last - first;
+
+	for (uint32_t i = first; i < last; i++)
+	{
+		arr[i] = sin (0.00001 * arr[i]);
+	}
+
+	if (rank == 0)
+	{
+		for (int i = 1; i < size; i++)
+		{
+			int f = xSize * ySize * i / size;
+			int l = xSize * ySize * (i + 1) / size;
+			MPI_Recv (arr + f, l - f, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, &status);
+		}
+	}
+	if (rank)
+	{
+		MPI_Send (arr + first, len, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+		free (arr);
+	}
 }
 
 int main(int argc, char** argv)
