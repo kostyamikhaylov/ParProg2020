@@ -4,65 +4,135 @@
 #include <mpi.h>
 #include <unistd.h>
 #include <cmath>
+#include <string.h>
+
+#define OFFSET(y, x) (y) * xSize + (x)
 
 void calc(double* frame, uint32_t ySize, uint32_t xSize, double delta, int rank, int size)
 {
-  if (rank == 0 && size > 0)
-  {
-    double diff = 0;
-    double* tmpFrame = new double[ySize * xSize];
-    // Prepare tmpFrame
-    for (uint32_t y = 0; y < ySize; y++)
-    {
-      tmpFrame[y*xSize] = frame[y*xSize];
-      tmpFrame[y*xSize + xSize - 1] = frame[y*xSize + xSize - 1];
-    }
-    for (uint32_t x = 1; x < xSize - 1; x++)
-    {
-      tmpFrame[x] = frame[x];
-      tmpFrame[(ySize - 1)*xSize + x] = frame[(ySize - 1)*xSize + x];
-    }
-    // Calculate first iteration
-    for (uint32_t y = 1; y < ySize - 1; y++)
-    {
-      for (uint32_t x = 1; x < xSize - 1; x++)
-      {
-        tmpFrame[y*xSize + x] = (frame[(y + 1)*xSize + x] + frame[(y - 1)*xSize + x] +\
-                                frame[y*xSize + x + 1] + frame[y*xSize + x - 1])/4.0;
-        diff += std::abs(tmpFrame[y*xSize + x] - frame[y*xSize + x]);
-      }
-    }
+	MPI_Status status;
+	MPI_Request request;
+	MPI_Bcast (&xSize, 1, MPI_INT, 0, MPI_COMM_WORLD);
+	MPI_Bcast (&ySize, 1, MPI_INT, 0, MPI_COMM_WORLD);
+	MPI_Bcast (&delta, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-    double* currFrame = tmpFrame;
-    double* nextFrame = frame;
-    uint32_t iteration = 1;
-    // Calculate frames
-    while (diff > delta)
-    {
-      diff = 0;
-      for (uint32_t y = 1; y < ySize - 1; y++)
-      {
-        for (uint32_t x = 1; x < xSize - 1; x++)
-        {
-          nextFrame[y*xSize + x] = (currFrame[(y + 1)*xSize + x] + currFrame[(y - 1)*xSize + x] +\
-                                  currFrame[y*xSize + x + 1] + currFrame[y*xSize + x - 1])/4.0;
-          diff += std::abs(nextFrame[y*xSize + x] - currFrame[y*xSize + x]);
-        }
-      }
-      std::swap(currFrame, nextFrame);
-      iteration++;
-    }
+	uint32_t yFirst = ySize * rank / size;
+	if (yFirst == 0)
+		yFirst = 1;
+	uint32_t yLast = ySize * (rank + 1) / size;
+	if (yLast == ySize)
+		yLast = ySize - 1;
+	uint32_t yLen = yLast - yFirst;
 
-    // Copy result from tmp
-    if (iteration % 2 == 1)
-    {
-      for (uint32_t i = 0; i < xSize*ySize; i++)
-      {
-        frame[i] = tmpFrame[i];
-      }
-    }
-    delete tmpFrame;
-  }
+	double diff = 0;
+	if (yLen <= 0)
+		diff = 2 * delta;
+	double* tmpFrame = (double *) calloc (xSize * ySize, sizeof (*tmpFrame));
+	if (rank)
+		frame = (double *) calloc (xSize * ySize, sizeof (*frame));
+	if (!tmpFrame || !frame)
+	{
+		fprintf (stderr, "calloc error\n");
+		exit (-1);
+	}
+
+	MPI_Bcast (frame, xSize * ySize, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	memcpy (tmpFrame, frame, xSize * ySize * sizeof (double));
+
+	// Calculate first iteration
+	for (uint32_t y = yFirst; y < yLast; y++)
+	{
+		for (uint32_t x = 1; x < xSize - 1; x++)
+		{
+			tmpFrame[OFFSET(y, x)] = (frame[OFFSET(y + 1, x)] + frame[OFFSET(y - 1, x)] + frame[OFFSET(y, x + 1)] + frame[OFFSET(y, x - 1)]) / 4.0;
+			diff += std::abs (tmpFrame[OFFSET (y, x)] - frame[OFFSET(y, x)]);
+		}
+	}
+	MPI_Barrier (MPI_COMM_WORLD);
+
+	double* currFrame = tmpFrame;
+	double* nextFrame = frame;
+	uint32_t iteration = 1;
+	// Calculate frames
+	while (diff > delta)
+	{
+		diff = 0;
+		double diff_reduce = 0;
+		if (rank != 0 && yLen > 0)
+		{
+			MPI_Isend (currFrame + OFFSET (yFirst, 0), xSize, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, &request);
+			MPI_Irecv (currFrame + OFFSET (yFirst - 1, 0), xSize, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, &request);
+		}
+		if (rank != size - 1 && yLen > 0)
+		{
+			MPI_Isend (currFrame + OFFSET (yLast - 1, 0), xSize, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, &request);
+			MPI_Irecv (currFrame + OFFSET (yLast, 0), xSize, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, &request);
+		}
+		MPI_Barrier (MPI_COMM_WORLD);
+
+
+		for (uint32_t y = yFirst; y < yLast; y++)
+		{
+			for (uint32_t x = 1; x < xSize - 1; x++)
+			{
+				nextFrame[OFFSET(y, x)] = (currFrame[OFFSET(y + 1, x)] + currFrame[OFFSET(y - 1, x)] + currFrame[OFFSET(y, x + 1)] + currFrame[OFFSET(y, x - 1)]) / 4.0;
+				diff += std::abs (nextFrame[OFFSET(y, x)] - currFrame[OFFSET(y, x)]);
+			}
+		}
+
+		MPI_Reduce (&diff, &diff_reduce, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+		if (!rank)
+			diff = diff_reduce;
+		MPI_Bcast (&diff, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+		std::swap (currFrame, nextFrame);
+		iteration++;
+	}
+
+	// Copy result from tmp
+	if (iteration % 2 == 1)
+	{
+		if (!rank)
+		{
+			memcpy (frame + OFFSET (yFirst, 0), tmpFrame + OFFSET (yFirst, 0), yLen * xSize * sizeof (double));
+			for (int i = 1; i < size; i++)
+			{
+				uint32_t first = ySize * i / size;
+				if (first == 0)
+					first = 1;
+				uint32_t last = ySize * (i + 1) / size;
+				if (last == ySize)
+					last = ySize - 1;
+				uint32_t len = last - first;
+				MPI_Recv (frame + OFFSET(first, 0), len * xSize, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, &status);
+			}
+		}
+		if (rank)
+			MPI_Send (tmpFrame + OFFSET (yFirst, 0), yLen * xSize, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+	}
+	else
+	{
+		if (!rank)
+		{
+			for (int i = 1; i < size; i++)
+			{
+				uint32_t first = ySize * i / size;
+				if (first == 0)
+					first = 1;
+				uint32_t last = ySize * (i + 1) / size;
+				if (last == ySize)
+					last = ySize - 1;
+				uint32_t len = last - first;
+				MPI_Recv (frame + OFFSET(first, 0), len * xSize, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, &status);
+			}
+		}
+		if (rank)
+			MPI_Send (frame + OFFSET (yFirst, 0), yLen * xSize, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+	}
+
+	free (tmpFrame);
+	if (rank)
+		free (frame);
 }
 
 int main(int argc, char** argv)
